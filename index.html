@@ -62,7 +62,7 @@
 
     canvas {
       /* Mobile-first: confortável em tela de celular */
-      width: min(92vw, 420px);
+      width: 100%;
       height: min(70vh, 640px);
       aspect-ratio: 3 / 4;
       image-rendering: pixelated;
@@ -72,6 +72,11 @@
       box-shadow: 0 22px 70px rgba(0,0,0,.55);
       outline: none;
       display: block;
+    }
+
+    /* Em desktop, pode crescer um pouco sem ficar gigante */
+    @media (min-width: 900px) {
+      canvas { height: min(78vh, 760px); }
     }
 
     /* Em desktop, pode crescer um pouco sem ficar gigante */
@@ -91,43 +96,47 @@
       user-select: none;
     }
 
-    /* Controles touch (mobile-first) */
+    /* Controles touch (mobile-first) — virtual gamepad */
+    .stage{ position: relative; width: min(92vw, 420px); }
+    @media (min-width: 900px){ .stage{ width: min(70vw, 520px); } }
+
     .touch-controls{
-      width: min(560px, 92vw);
+      position: absolute;
+      left: 0; right: 0; bottom: 10px;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
       align-items: end;
-      margin-bottom: 4px;
+      padding: 0 10px;
       touch-action: none;
       user-select: none;
+      pointer-events: none; /* permite tocar no canvas */
     }
-    .dpad{ display:flex; flex-direction:column; gap:8px; }
+    .dpad{ display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
     .dpad .row{ display:flex; gap:8px; justify-content:space-between; }
     .actions{ display:flex; gap:10px; justify-content:flex-end; align-items:end; }
 
     .tbtn{
+      pointer-events: auto; /* reativa clique */
       -webkit-tap-highlight-color: transparent;
       touch-action: none;
       user-select: none;
       border: 1px solid rgba(255,255,255,.16);
-      background: rgba(255,255,255,.07);
+      background: rgba(255,255,255,.09);
       color: #d8ecff;
       border-radius: 14px;
       padding: 12px 14px;
       font-weight: 900;
       letter-spacing: .3px;
       box-shadow: 0 10px 28px rgba(0,0,0,.35);
-      min-width: 64px;
+      min-width: 58px;
       text-align:center;
     }
-    .tbtn:active{ transform: translateY(1px) scale(.99); background: rgba(255,255,255,.12); }
-    .tbtn.big{ padding: 14px 16px; min-width: 110px; }
+    .tbtn:active{ transform: translateY(1px) scale(.99); background: rgba(255,255,255,.14); }
+    .tbtn.big{ padding: 14px 16px; min-width: 120px; }
 
-    /* Em desktop, escondemos os botões touch */
-    @media (min-width: 900px){
-      .touch-controls{ display:none; }
-    }
+    /* Em desktop, escondemos o gamepad */
+    @media (min-width: 900px){ .touch-controls{ display:none; } }
 
     .btn {
       cursor: pointer;
@@ -189,9 +198,10 @@
       </div>
     </div>
 
-    <canvas id="game" width="360" height="480" tabindex="0" aria-label="Trânsito Terrível"></canvas>
+    <div class="stage" aria-label="Área do jogo">
+      <canvas id="game" width="360" height="480" tabindex="0" aria-label="Trânsito Terrível"></canvas>
 
-    <!-- Controles mobile (touch) -->
+      <!-- Controles mobile (touch) - virtual gamepad overlay -->
     <div class="touch-controls" aria-label="Controles mobile">
       <div class="dpad">
         <button class="tbtn" data-key="ArrowUp" aria-label="Pra cima">▲</button>
@@ -205,6 +215,7 @@
         <button class="tbtn big" data-action="shoot" aria-label="Atirar">REMO</button>
         <button class="tbtn" data-action="pause" aria-label="Pausar">P</button>
       </div>
+    </div>
     </div>
 
     <div class="hint">
@@ -232,10 +243,53 @@
       }
       window.addEventListener("resize", () => { fitCanvas(); syncWH(); });
       requestAnimationFrame(() => { fitCanvas(); syncWH(); });
-      canvas.addEventListener("pointerdown", () => {
+
+      // --- Touch steering (arrastar o dedo na pista) ---
+      const toCanvas = (clientX, clientY) => {
+        const r = canvas.getBoundingClientRect();
+        const sx = canvas.width / r.width;
+        const sy = canvas.height / r.height;
+        return { x: (clientX - r.left) * sx, y: (clientY - r.top) * sy };
+      };
+
+      const touch = { active:false, id:null };
+      function applyFingerControl(cx, cy) {
+        // move o táxi para onde o dedo está (dentro da pista)
+        const b = roadBoundsAt(player.y);
+        player.x = clamp(cx, b.left + 18, b.right - 18);
+
+        // controla frente/trás pelo Y do dedo (mais alto = mais pra frente)
+        const minY = H * 0.55;
+        const maxY = H - (player.h / 2) - 6;
+        player.y = clamp(cy, minY, maxY);
+      }
+
+      canvas.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
         canvas.focus();
         if (!running) start();
-      });
+        // em mobile: arrastar controla o carro
+        if (e.pointerType !== "mouse") {
+          touch.active = true;
+          touch.id = e.pointerId;
+          canvas.setPointerCapture?.(e.pointerId);
+          const p = toCanvas(e.clientX, e.clientY);
+          applyFingerControl(p.x, p.y);
+        }
+      }, { passive:false });
+
+      canvas.addEventListener("pointermove", (e) => {
+        if (!touch.active || e.pointerId !== touch.id) return;
+        if (paused || gameOver) return;
+        const p = toCanvas(e.clientX, e.clientY);
+        applyFingerControl(p.x, p.y);
+      }, { passive:false });
+
+      function endTouch(e){
+        if (e.pointerId === touch.id) { touch.active = false; touch.id = null; }
+      }
+      canvas.addEventListener("pointerup", endTouch, { passive:false });
+      canvas.addEventListener("pointercancel", endTouch, { passive:false });
 
       // HUD
       const elScore = document.getElementById("score");
