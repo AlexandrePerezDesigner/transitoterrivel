@@ -98,6 +98,42 @@
 
     /* Controles touch (mobile-first) — virtual gamepad */
     .stage{ position: relative; width: min(92vw, 420px); }
+
+    /* Tela de início (capa) */
+    .start-screen{
+      position:absolute;
+      inset:0;
+      z-index:5;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      background:#000;
+      border-radius:16px;
+      overflow:hidden;
+    }
+    .start-screen img{
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+    }
+    .start-btn{
+      position:relative;
+      z-index:2;
+      margin-top:140px; /* desce o botão para não sobrepor o logo */
+      padding:16px 36px;
+      font-size:20px;
+      font-weight:900;
+      letter-spacing:1px;
+      border-radius:999px;
+      border:2px solid rgba(255,255,255,.35);
+      background:rgba(0,0,0,.55);
+      color:#ffd400;
+      box-shadow:0 10px 40px rgba(0,0,0,.6);
+    }
+    .start-btn:active{ transform:scale(.97); }
     @media (min-width: 900px){ .stage{ width: min(70vw, 520px); } }
 
     .touch-controls{
@@ -112,8 +148,10 @@
       user-select: none;
       pointer-events: none; /* permite tocar no canvas */
     }
-    .dpad{ display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
-    .dpad .row{ display:flex; gap:8px; justify-content:space-between; }
+    .dpad{ display:flex; flex-direction:column; gap:8px; align-items:stretch; }
+    /* garante o ▲ centralizado acima do ▼ */
+    .dpad > .tbtn[data-key="ArrowUp"]{ align-self:center; }
+    .dpad .row{ display:flex; gap:8px; justify-content:space-between; width:100%; }
     .actions{ display:flex; gap:10px; justify-content:flex-end; align-items:end; }
 
     .tbtn{
@@ -199,6 +237,11 @@
     </div>
 
     <div class="stage" aria-label="Área do jogo">
+      <!-- Tela de capa -->
+      <div id="startScreen" class="start-screen">
+        <img src="assets/capa.jpg" alt="Capa Trânsito Terrível" />
+        <button id="btnStart" class="start-btn">START</button>
+      </div>
       <canvas id="game" width="360" height="480" tabindex="0" aria-label="Trânsito Terrível"></canvas>
 
       <!-- Controles mobile (touch) - virtual gamepad overlay -->
@@ -244,52 +287,16 @@
       window.addEventListener("resize", () => { fitCanvas(); syncWH(); });
       requestAnimationFrame(() => { fitCanvas(); syncWH(); });
 
-      // --- Touch steering (arrastar o dedo na pista) ---
-      const toCanvas = (clientX, clientY) => {
-        const r = canvas.getBoundingClientRect();
-        const sx = canvas.width / r.width;
-        const sy = canvas.height / r.height;
-        return { x: (clientX - r.left) * sx, y: (clientY - r.top) * sy };
-      };
-
-      const touch = { active:false, id:null };
-      function applyFingerControl(cx, cy) {
-        // move o táxi para onde o dedo está (dentro da pista)
-        const b = roadBoundsAt(player.y);
-        player.x = clamp(cx, b.left + 18, b.right - 18);
-
-        // controla frente/trás pelo Y do dedo (mais alto = mais pra frente)
-        const minY = H * 0.55;
-        const maxY = H - (player.h / 2) - 6;
-        player.y = clamp(cy, minY, maxY);
-      }
+      // --- Touch steering na pista (DESATIVADO) ---
+      // Alexandre pediu para não teletransportar ao tocar na pista.
+      // O controle deve ser somente via virtual gamepad.
+      const touchSteerEnabled = false;
 
       canvas.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         canvas.focus();
-        if (!running) start();
-        // em mobile: arrastar controla o carro
-        if (e.pointerType !== "mouse") {
-          touch.active = true;
-          touch.id = e.pointerId;
-          canvas.setPointerCapture?.(e.pointerId);
-          const p = toCanvas(e.clientX, e.clientY);
-          applyFingerControl(p.x, p.y);
-        }
+        // Não inicia o jogo ao tocar na pista — apenas o botão START
       }, { passive:false });
-
-      canvas.addEventListener("pointermove", (e) => {
-        if (!touch.active || e.pointerId !== touch.id) return;
-        if (paused || gameOver) return;
-        const p = toCanvas(e.clientX, e.clientY);
-        applyFingerControl(p.x, p.y);
-      }, { passive:false });
-
-      function endTouch(e){
-        if (e.pointerId === touch.id) { touch.active = false; touch.id = null; }
-      }
-      canvas.addEventListener("pointerup", endTouch, { passive:false });
-      canvas.addEventListener("pointercancel", endTouch, { passive:false });
 
       // HUD
       const elScore = document.getElementById("score");
@@ -327,6 +334,12 @@
       }
 
       // Assets
+      const logoImg = new Image();
+      logoImg.src = "assets/logo.png";
+      let logoOk = false;
+      logoImg.onload = () => { logoOk = true; };
+      logoImg.onerror = () => { logoOk = false; };
+
       const remoImg = new Image();
       remoImg.src = "assets/remo.png"; // 16x47
 
@@ -467,11 +480,7 @@
         const k = e.key;
         if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","p","P","r","R","c","C"].includes(k)) e.preventDefault();
 
-        // First interaction: start
-        if (!running && ["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","p","P"].includes(k)) {
-          start();
-        }
-
+        
         // Pause
         if ((k === "p" || k === "P") && running && !gameOver) {
           paused = !paused;
@@ -515,7 +524,7 @@
           const key = btn.getAttribute('data-key');
           btn.addEventListener('pointerdown', (e)=>{
             e.preventDefault();
-            if (!running) start();
+            if (!running) return;
             press(key);
             btn.setPointerCapture?.(e.pointerId);
           });
@@ -532,7 +541,7 @@
         if (shootBtn) {
           shootBtn.addEventListener('pointerdown', (e)=>{
             e.preventDefault();
-            if (!running) start();
+            if (!running) return;
             if (!paused && !gameOver) shoot();
             shootBtn.setPointerCapture?.(e.pointerId);
           });
@@ -541,7 +550,7 @@
         if (pauseBtn) {
           pauseBtn.addEventListener('pointerdown', (e)=>{
             e.preventDefault();
-            if (!running) start();
+            if (!running) return;
             if (!gameOver) {
               paused = !paused;
               if (paused) beep(240, .06, "square", .03);
@@ -570,7 +579,6 @@
         targetSpeedMul = 1.0;
 
         player.x = W / 2;
-        // 🚕 carro inicia colado na base
         player.y = H - (player.h / 2) - 8;
         player.vx = 0;
         player.invuln = 0;
@@ -586,7 +594,7 @@
         dashOffset = 0;
         paused = true;
         gameOver = false;
-        running = false;
+        running = false; // 🚫 não inicia antes do START
         chaos = false;
         modeTag.style.display = "none";
         powerTag.style.display = "none";
@@ -596,16 +604,32 @@
       }
 
       function start() {
+        // 🟢 score começa somente ao clicar START
+        score = 0;
+        const ss = document.getElementById("startScreen");
+        if (ss) ss.style.display = "none";
         running = true;
         paused = false;
+        gameOver = false;
         canvas.focus();
         beep(660, .06, "square", .03);
+        syncHUD();
+      }
+
+      // Start via botão
+      const btnStart = document.getElementById("btnStart");
+      if (btnStart) {
+        btnStart.addEventListener("click", () => {
+          start();
+        });
       }
 
       function restart() {
         reset();
         start();
       }
+
+      // reset duplicado removido — causava início automático do score
 
       function syncHUD() {
         elScore.textContent = Math.floor(score);
@@ -1192,6 +1216,25 @@
         ctx.clearRect(0, 0, W, H);
         drawRoad();
 
+        // Logo dentro do canvas (garante que aparece mesmo no mobile)
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        if (logoOk && logoImg.complete && logoImg.naturalWidth > 0) {
+          const targetW = Math.min(96, W * 0.28);
+          const scale = targetW / logoImg.naturalWidth;
+          const targetH = logoImg.naturalHeight * scale;
+          ctx.drawImage(logoImg, (W - targetW) / 2, 10, targetW, targetH);
+        } else {
+          // fallback caso a imagem não carregue
+          ctx.fillStyle = "rgba(0,0,0,.35)";
+          ctx.fillRect(W/2 - 135, 10, 270, 34);
+          ctx.fillStyle = "#d8ecff";
+          ctx.font = "900 18px ui-sans-serif, system-ui";
+          ctx.textAlign = "center";
+          ctx.fillText("TRÂNSITO TERRÍVEL", W/2, 34);
+        }
+        ctx.restore();
+
         // powerups
         for (const p of powerups) drawPowerup(p);
 
@@ -1218,7 +1261,7 @@
         }
 
         // screens
-        if (!running) overlay("TRÂNSITO TERRÍVEL", "Clique no jogo e aperte qualquer tecla");
+        if (!running) overlay("TRÂNSITO TERRÍVEL", "Toque em START para começar");
         else if (paused && !gameOver) overlay("PAUSADO", "Pressione P para voltar");
         else if (gameOver) overlay("GAME OVER", "Pressione R para reiniciar");
 
